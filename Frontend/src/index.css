@@ -1,0 +1,41 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Custom Styles */
+.white-outline {
+    -webkit-text-stroke: 0.5px white; /* For Safari/Chrome */
+    text-stroke: 0.5px white; /* Standard syntax */
+    color: gray; /* Text color */
+}
+
+body {
+    background-color: #F2F0EF; /* Background color for the entire page */
+}
+
+.shopBtn{
+    background-color: rgba(255, 255, 255, 0.1);
+    border-color: #fff;
+    border-width: 3px;
+}
+
+.contactBtn{
+    background-color: white;
+    border-color: #fff;
+    border-width: 3px;
+}
+
+.contactContainer{
+    background-color: rgba(77, 100, 228, 0.55);
+}
+
+/* Hide scrollbar for Chrome, Safari, and Opera */
+.hide-scrollbar::-webkit-scrollbar {
+    display: none;
+}
+
+/* Hide scrollbar for IE, Edge, and Firefox */
+.hide-scrollbar {
+    -ms-overflow-style: none; /* IE and Edge */
+    scrollbar-width: none; /* Firefox */
+}
