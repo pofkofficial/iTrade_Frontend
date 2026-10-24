@@ -218,7 +218,7 @@ const Checkout = () => {
 
   // Paystack payment function
   const processOnlinePayment = useCallback(async () => {
-    const paystackKey = import.meta.env.VITE_PAYSTACK_PUBLIC_TEST;
+    const paystackKey = import.meta.env.VITE_PAYSTACK_PUBLIC;
     
     if (!paystackKey) {
       throw new Error('Payment configuration error. Please contact support.');
