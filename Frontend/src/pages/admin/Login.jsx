@@ -43,7 +43,7 @@ const Login = () => {
       
       if (response?.token) {
         setLoginSuccess(true);
-        setTimeout(() => navigate('/admin'), 1000);
+        navigate('/admin');
       } else {
         // Handle backend-specific error messages
         const errorMsg = response?.status === 403
