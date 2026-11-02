@@ -14,8 +14,10 @@ import Order_Confirmation from "./pages/Order-confirmation";
 import Developertag from "./components/Developertag";
 import { ToastContainer } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
+import usePageTracking from "./hooks/usePageTracking";
 
 const App = () => {
+  usePageTracking();
   return (
     <HelmetProvider>
       <Routes>
