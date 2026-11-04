@@ -84,7 +84,7 @@ const Checkout = () => {
 
   useEffect(() => {
     // Auto-switch payment method if region changes
-    if (formData.payment_method === 'cash_on_delivery' && formData.region !== 'Greater Accra') {
+    if (formData.payment_method === 'payment_on_delivery' && formData.region !== 'Greater Accra') {
       setFormData(prev => ({ ...prev, payment_method: 'mobile_money' }));
     }
   }, [formData.region]);
@@ -106,7 +106,7 @@ const Checkout = () => {
   const availablePaymentMethods = useMemo(() => 
     PAYMENT_METHODS.map(method => ({
       ...method,
-      available: method.id === 'cash_on_delivery' 
+      available: method.id === 'payment_on_delivery' 
         ? formData.region === 'Greater Accra'
         : method.available
     })), [formData.region]
