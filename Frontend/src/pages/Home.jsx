@@ -21,7 +21,7 @@ const images = Object.values(imageLists).map(module => module.default);
 const policies = [
   { icon: Truck, title: 'Free delivery', desc: 'Nationwide. No hidden fees.' },
   { icon: ShieldCheck, title: 'Warranty protected', desc: '14-day returns on every order.' },
-  { icon: Gift, title: 'Free case + protector', desc: 'Included with every purchase.' },
+  { icon: Gift, title: 'Free case / protector', desc: 'Included with every purchase.' },
 ];
 
 const SLIDE_MS = 5000;

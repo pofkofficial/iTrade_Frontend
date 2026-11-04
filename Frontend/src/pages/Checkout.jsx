@@ -185,6 +185,8 @@ const Checkout = () => {
     return null;
   }, [cart, formData]);
 
+  const paidReferenceRef = useRef(null);
+
   // Order preparation
   const prepareOrderData = useCallback(() => ({
     customer_name: formData.customer_name.trim(),
@@ -195,8 +197,6 @@ const Checkout = () => {
     region: formData.region,
     postal_code: formData.postal_code.trim(),
     payment_method: formData.payment_method,
-    status: 'pending',
-    payment_status: 'pending',
     items: cart.map(item => ({
       phone_id: item.id,
       memory_variant_id: item.memory.id,
@@ -289,11 +289,9 @@ const Checkout = () => {
   const submitOrderToAPI = useCallback(async (orderData, paymentReference = null) => {
     const payload = {
       ...orderData,
-      payment_status: paymentReference ? 'paid' : 'pending',
       ...(paymentReference && { payment_reference: paymentReference })
     };
 
-    console.log('Submitting order payload:', payload);
     const response = await api.post('/order/', payload);
     return response.data;
   }, []);
@@ -310,18 +308,18 @@ const Checkout = () => {
 
       const orderData = prepareOrderData();
 
+      // Reuse a reference that was already paid, so a failed order submit never charges twice
       let paymentReference = null;
-
-      // Process payment if not cash on delivery
       if (formData.payment_method === 'mobile_money') {
-        paymentReference = await processOnlinePayment();
+        paymentReference = paidReferenceRef.current || await processOnlinePayment();
+        paidReferenceRef.current = paymentReference;
       }
 
       // Submit order
-      console.log('Submitting order with payment reference:', paymentReference);
       const orderResponse = await submitOrderToAPI(orderData, paymentReference);
       
       if (orderResponse?.status === 'success' && orderResponse?.order_number) {
+        paidReferenceRef.current = null;
         navigate('/order-confirmation', {
           state: {
             order: {

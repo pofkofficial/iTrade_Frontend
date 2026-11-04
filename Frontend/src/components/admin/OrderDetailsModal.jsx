@@ -183,6 +183,8 @@ const OrderDetailsModal = ({ order, onClose, onStatusChange, onDelete }) => {
                         }`}
                       >
                         <option value="pending">Pending</option>
+                        <option value="confirmed">Confirmed</option>
+                        <option value="out_for_delivery">Out for delivery</option>
                         <option value="shipped">Shipped</option>
                         <option value="delivered">Delivered</option>
                         <option value="cancelled">Cancelled</option>

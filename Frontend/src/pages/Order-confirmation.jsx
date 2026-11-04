@@ -36,7 +36,6 @@ const Order_Confirmation = () => {
         const cart = location.state?.cart; // Array of cart items
         const formData = location.state?.formData; // Customer and delivery info
 
-        console.log('Location state received:', { locationOrder, cart, formData });
 
         if (locationOrder && cart && formData) {
           // Build complete order object from checkout data
@@ -80,7 +79,6 @@ const Order_Confirmation = () => {
             created_at: new Date().toISOString()
           };
 
-          console.log('Complete order built:', completeOrder);
           setOrder(completeOrder);
 
           // Track conversion
@@ -101,8 +99,11 @@ const Order_Confirmation = () => {
           throw new Error('Incomplete order data. Please ensure all information was provided during checkout.');
         }
       } catch (err) {
-        console.error('Order initialization error:', err);
-        setError(err.message);
+        setError(
+          err instanceof Error
+            ? err.message
+            : 'Unable to prepare your order confirmation.'
+        );
       } finally {
         setIsLoading(false);
       }

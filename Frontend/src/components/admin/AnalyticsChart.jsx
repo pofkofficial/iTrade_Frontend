@@ -1,500 +1,192 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
-import { Line, Bar, Pie } from 'react-chartjs-2';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Bar, Doughnut, Line } from 'react-chartjs-2';
 import { Chart as ChartJS, registerables } from 'chart.js';
-import { useNavigate } from 'react-router-dom';
-import { FiInfo } from 'react-icons/fi';
+import { FiActivity, FiAlertCircle, FiArrowDownRight, FiArrowUpRight, FiBarChart2, FiCalendar, FiRefreshCw, FiShoppingBag, FiUsers, FiEye, FiDollarSign, FiTarget } from 'react-icons/fi';
 import { toast } from 'react-toastify';
-import { useAuth } from '../../context/AuthContext';
-import { useFetch } from '../../hooks/useFetch';
-import TopSellingPhones from './TopPhonesAnalytics';
-import { motion } from 'framer-motion';
+import api from '@utils/api';
 
 ChartJS.register(...registerables);
 
-const chartColors = {
-  primary: 'rgba(79, 70, 229, 0.7)',
-  secondary: 'rgba(99, 102, 241, 0.7)',
-  tertiary: 'rgba(129, 140, 248, 0.7)',
-  quaternary: 'rgba(165, 180, 252, 0.7)',
-  cancelled: 'rgba(239, 68, 68, 0.7)',
-  delivered: 'rgba(16, 185, 129, 0.7)',
-  shipped: 'rgba(59, 130, 246, 0.7)',
-  pending: 'rgba(245, 158, 11, 0.7)',
-};
+const money = value => `₵${Number(value || 0).toLocaleString('en-GH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const number = value => Number(value || 0).toLocaleString('en-GH');
+const percent = value => `${Number(value || 0).toFixed(1)}%`;
+const palette = ['#3157D5', '#16A085', '#F59E0B', '#8B5CF6', '#EC4899', '#0EA5E9', '#64748B', '#EF4444'];
 
-const chartOptions = {
-  line: {
-    responsive: true,
-    maintainAspectRatio: false,
-    plugins: {
-      legend: { display: false },
-      tooltip: {
-        callbacks: {
-          label: (context) => `₵${context.raw.toLocaleString()}`
-        }
-      }
-    },
-    scales: {
-      x: { ticks: { maxRotation: 45, minRotation: 45, font: { size: 12 } } },
-      y: { 
-        beginAtZero: true, 
-        grid: { color: 'rgba(0, 0, 0, 0.05)' },
-        ticks: { font: { size: 12 } }
-      }
-    }
+const baseChartOptions = {
+  responsive: true,
+  maintainAspectRatio: false,
+  interaction: { mode: 'index', intersect: false },
+  plugins: {
+    legend: { display: false },
+    tooltip: { backgroundColor: '#111827', padding: 12, cornerRadius: 8 },
   },
-  bar: {
-    responsive: true,
-    maintainAspectRatio: false,
-    plugins: { legend: { display: false } },
-    scales: {
-      x: { ticks: { maxRotation: 45, minRotation: 45, font: { size: 12 } } },
-      y: { 
-        beginAtZero: true, 
-        grid: { color: 'rgba(0, 0, 0, 0.05)' },
-        ticks: { font: { size: 12 } }
-      }
-    }
+  scales: {
+    x: { grid: { display: false }, ticks: { color: '#64748B', maxTicksLimit: 8, maxRotation: 0 } },
+    y: { beginAtZero: true, grid: { color: '#EEF2F7' }, ticks: { color: '#64748B' } },
   },
-  pie: {
-    responsive: true,
-    maintainAspectRatio: false,
-    plugins: {
-      legend: { 
-        position: 'bottom',
-        labels: { font: { size: 12 }, padding: 10 }
-      }
-    }
-  }
 };
 
-const CardWithTooltip = ({ title, value, tooltip }) => {
-  const [showTooltip, setShowTooltip] = useState(false);
-
-  return (
-    <motion.div 
-      whileHover={{ y: -5 }}
-      className="bg-white rounded-lg shadow-sm p-3 sm:p-4 relative"
-      onClick={() => setShowTooltip(!showTooltip)}
-    >
-      <h4 className="text-xs sm:text-sm font-medium text-gray-500">{title}</h4>
-      <p className="text-lg sm:text-xl md:text-2xl font-bold mt-1">{value}</p>
-      {tooltip && (
-        <div className="relative">
-          <FiInfo className="text-gray-400 absolute top-0 right-0 w-4 h-4 sm:w-5 sm:h-5" />
-          <div className={`${showTooltip ? 'block' : 'hidden'} sm:group-hover:block absolute z-10 w-48 sm:w-64 p-2 bg-white shadow-lg rounded-md text-xs sm:text-sm text-gray-600 -top-2 sm:top-6 right-0 sm:-right-2 mt-2 sm:mt-0`}>
-            {tooltip}
-          </div>
-        </div>
-      )}
-    </motion.div>
-  );
-};
-
-const SkeletonCard = () => (
-  <div className="bg-gray-100 rounded-lg p-3 sm:p-4 animate-pulse">
-    <div className="h-4 bg-gray-300 rounded w-1/3 mb-2"></div>
-    <div className="h-6 sm:h-8 bg-gray-300 rounded w-1/2"></div>
-  </div>
-);
-
-const SkeletonChart = () => (
-  <div className="bg-gray-100 rounded-lg p-3 sm:p-6 animate-pulse">
-    <div className="h-4 bg-gray-300 rounded w-1/4 mb-4"></div>
-    <div className="h-40 sm:h-64 md:h-80"></div>
-  </div>
-);
-
-const AnalyticsDashboard = () => {
-  const { user, loading: authLoading, error: authError } = useAuth();
-  const navigate = useNavigate();
-  const { data: orders, loading, error, refetch } = useFetch('/orders/', {}, [user]);
-  const [timeRange, setTimeRange] = useState('monthly');
-  const [activeTab, setActiveTab] = useState('overview');
-  const [filterType, setFilterType] = useState('all');
-
-  useEffect(() => {
-    if (!authLoading && !user) {
-      navigate('/admin/login');
-    }
-    if (authError) {
-      toast.error(authError);
-    }
-    if (error) {
-      toast.error(error);
-    }
-  }, [user, authLoading, authError, error, navigate]);
-
-  const processData = useMemo(() => {
-    if (!orders || !Array.isArray(orders)) {
-      console.warn('Orders data is invalid or empty:', orders);
-      return {
-        monthlyLabels: [],
-        weeklyLabels: [],
-        monthlySales: [],
-        monthlyOrders: [],
-        weeklySales: [],
-        weeklyOrders: [],
-        paymentMethods: { labels: [], data: [] },
-        statusDistribution: { labels: [], data: [] },
-        uniqueCustomers: 0,
-        filteredOrders: [],
-        totalSales: 0
-      };
-    }
-
-    const filteredOrders = filterType === 'delivered'
-      ? orders.filter(order => order.status === 'delivered')
-      : orders;
-
-    // Calculate total sales with strict type checking
-    const totalSales = filteredOrders.reduce((sum, order) => {
-      const price = Number(order.total_price) || 0;
-      if (isNaN(price)) {
-        console.warn(`Invalid total_price for order ${order.id}: ${order.total_price}`);
-      }
-      return sum + price;
-    }, 0);
-
-    const now = new Date();
-    const monthlyData = Array(12).fill(0).map((_, i) => {
-      const monthOrders = filteredOrders.filter(order => {
-        const orderDate = new Date(order.created_at);
-        return orderDate.getFullYear() === now.getFullYear() && orderDate.getMonth() === i;
-      });
-      return {
-        sales: monthOrders.reduce((sum, order) => sum + (Number(order.total_price) || 0), 0),
-        count: monthOrders.length
-      };
-    });
-
-    const weeklyData = Array(4).fill(0).map((_, i) => {
-      const weekStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 7 * (i + 1));
-      const weekEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 7 * i);
-      const weekOrders = filteredOrders.filter(order => {
-        const orderDate = new Date(order.created_at);
-        return orderDate >= weekStart && orderDate < weekEnd;
-      });
-      return {
-        sales: weekOrders.reduce((sum, order) => sum + (Number(order.total_price) || 0), 0),
-        count: weekOrders.length
-      };
-    }).reverse();
-
-    const paymentMethods = filteredOrders.reduce((acc, order) => {
-      const method = order.payment_method || 'unknown';
-      acc[method] = (acc[method] || 0) + 1;
-      return acc;
-    }, {});
-
-    const statusDistribution = filteredOrders.reduce((acc, order) => {
-      const status = order.status || 'unknown';
-      acc[status] = (acc[status] || 0) + 1;
-      return acc;
-    }, {});
-
-    const uniqueCustomers = new Set(filteredOrders.map(order => order.customer_email)).size;
-
-    return {
-      monthlyLabels: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'],
-      weeklyLabels: ['Week 1', 'Week 2', 'Week 3', 'Week 4'],
-      monthlySales: monthlyData.map(m => m.sales),
-      monthlyOrders: monthlyData.map(m => m.count),
-      weeklySales: weeklyData.map(w => w.sales),
-      weeklyOrders: weeklyData.map(w => w.count),
-      paymentMethods: {
-        labels: Object.keys(paymentMethods).map(label => label.replace(/_/g, ' ')),
-        data: Object.values(paymentMethods)
-      },
-      statusDistribution: {
-        labels: Object.keys(statusDistribution).map(label => label.charAt(0).toUpperCase() + label.slice(1)),
-        data: Object.values(statusDistribution)
-      },
-      uniqueCustomers,
-      filteredOrders,
-      totalSales
-    };
-  }, [orders, filterType]);
-
-  const {
-    monthlyLabels,
-    weeklyLabels,
-    monthlySales,
-    monthlyOrders,
-    weeklySales,
-    weeklyOrders,
-    paymentMethods,
-    statusDistribution,
-    uniqueCustomers,
-    filteredOrders,
-    totalSales
-  } = processData;
-
-  const salesData = {
-    labels: timeRange === 'monthly' ? monthlyLabels.slice(0, new Date().getMonth() + 1) : weeklyLabels,
-    datasets: [{
-      label: 'Sales (₵)',
-      data: timeRange === 'monthly' ? monthlySales : weeklySales,
-      borderColor: chartColors.primary,
-      backgroundColor: 'rgba(79, 70, 229, 0.1)',
-      tension: 0.3,
-      fill: true
-    }]
-  };
-
-  const ordersData = {
-    labels: timeRange === 'monthly' ? monthlyLabels.slice(0, new Date().getMonth() + 1) : weeklyLabels,
-    datasets: [{
-      label: 'Orders',
-      data: timeRange === 'monthly' ? monthlyOrders : weeklyOrders,
-      backgroundColor: chartColors.secondary
-    }]
-  };
-
-  const paymentMethodData = {
-    labels: paymentMethods.labels,
-    datasets: [{
-      data: paymentMethods.data,
-      backgroundColor: [chartColors.primary, chartColors.secondary, chartColors.tertiary, chartColors.quaternary],
-      borderWidth: 1
-    }]
-  };
-
-  const orderStatusData = {
-    labels: statusDistribution.labels,
-    datasets: [{
-      data: statusDistribution.data,
-      backgroundColor: [
-        chartColors.cancelled,
-        chartColors.delivered,
-        chartColors.shipped,
-        chartColors.pending
-      ],
-      borderWidth: 1
-    }]
-  };
-
-  const customerData = {
-    labels: ['Unique Customers', 'Total Orders'],
-    datasets: [{
-      data: [uniqueCustomers, filteredOrders.length],
-      backgroundColor: [chartColors.primary, chartColors.secondary],
-      borderWidth: 1
-    }]
-  };
-
-  const handleTimeRangeChange = useCallback((range) => {
-    setTimeRange(range);
-  }, []);
-
-  const handleTabChange = useCallback((tab) => {
-    setActiveTab(tab);
-  }, []);
-
-  const handleFilterTypeChange = useCallback((e) => {
-    setFilterType(e.target.value);
-  }, []);
-
-  if (authLoading || loading) {
-    return (
-      <div className="space-y-4 sm:space-y-6 p-3 sm:p-4 md:p-6">
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 sm:gap-4">
-          <SkeletonCard />
-          <SkeletonCard />
-          <SkeletonCard />
-          <SkeletonCard />
-        </div>
-        <SkeletonChart />
-      </div>
-    );
-  }
-
-  if (!user) return null;
-
-  return (
-    <div className="space-y-4 sm:space-y-6 p-3 sm:p-4 md:p-6">
-      {/* Summary Cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 sm:gap-4">
-        <CardWithTooltip 
-          title="Total Sales" 
-          value={`₵${totalSales.toLocaleString()}`}
-          tooltip={`Sum of ${filterType === 'delivered' ? 'delivered' : 'all'} orders in your store's currency`}
-        />
-        <CardWithTooltip 
-          title="Total Orders" 
-          value={filteredOrders.length}
-          tooltip={`Total number of ${filterType === 'delivered' ? 'delivered' : 'all'} orders placed in your store`}
-        />
-        <CardWithTooltip 
-          title="Avg. Order Value" 
-          value={`₵${((totalSales / (filteredOrders.length || 1)).toFixed(2))}`}
-          tooltip={`Average amount spent per ${filterType === 'delivered' ? 'delivered' : 'all'} order (Total Sales ÷ Total Orders)`}
-        />
-        <CardWithTooltip 
-          title="Completion Rate" 
-          value={`${((filteredOrders.filter(o => o.status === 'delivered').length / (filteredOrders.length || 1) * 100).toFixed(1))}%`}
-          tooltip={`Percentage of ${filterType === 'delivered' ? 'delivered' : 'all'} orders that reached 'delivered' status`}
-        />
-      </div>
-
-      {/* Main Chart Area */}
-      <div className="bg-white rounded-lg sm:rounded-xl shadow-sm p-3 sm:p-4 md:p-6">
-        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 sm:mb-6 gap-3">
-          <h3 className="text-md sm:text-lg md:text-xl font-semibold">Sales & Orders Analytics</h3>
-          <div className="flex flex-wrap gap-2 sm:gap-3 self-end sm:self-auto">
-            <button
-              onClick={() => handleTimeRangeChange('weekly')}
-              className={`px-3 sm:px-4 py-1.5 sm:py-2 text-xs sm:text-sm rounded-md ${timeRange === 'weekly' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'} min-w-[80px]`}
-              aria-label="Show weekly data"
-            >
-              Weekly
-            </button>
-            <button
-              onClick={() => handleTimeRangeChange('monthly')}
-              className={`px-3 sm:px-4 py-1.5 sm:py-2 text-xs sm:text-sm rounded-md ${timeRange === 'monthly' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'} min-w-[80px]`}
-              aria-label="Show monthly data"
-            >
-              Monthly
-            </button>
-            <select
-              value={filterType}
-              onChange={handleFilterTypeChange}
-              className="px-3 sm:px-4 py-1.5 sm:py-2 text-xs sm:text-sm rounded-md bg-gray-100 text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500 min-w-[120px]"
-              aria-label="Filter orders by status"
-            >
-              <option value="all">All Orders</option>
-              <option value="delivered">Delivered Orders</option>
-            </select>
-            <button
-              onClick={refetch}
-              className="px-3 sm:px-4 py-1.5 sm:py-2 text-xs sm:text-sm rounded-md bg-blue-600 text-white hover:bg-blue-700 min-w-[80px]"
-              aria-label="Refresh data"
-            >
-              Refresh
-            </button>
-          </div>
-        </div>
-
-        <div className="flex flex-wrap gap-2 sm:gap-3 mb-4 sm:mb-6">
-          <button
-            onClick={() => handleTabChange('overview')}
-            className={`px-3 sm:px-4 py-1.5 sm:py-2 text-xs sm:text-sm rounded-md ${activeTab === 'overview' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'} min-w-[80px]`}
-            aria-label="Show overview analytics"
-          >
-            Overview
-          </button>
-          <button
-            onClick={() => handleTabChange('payments')}
-            className={`px-3 sm:px-4 py-1.5 sm:py-2 text-xs sm:text-sm rounded-md ${activeTab === 'payments' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'} min-w-[80px]`}
-            aria-label="Show payment methods analytics"
-          >
-            Payments
-          </button>
-          <button
-            onClick={() => handleTabChange('status')}
-            className={`px-3 sm:px-4 py-1.5 sm:py-2 text-xs sm:text-sm rounded-md ${activeTab === 'status' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'} min-w-[80px]`}
-            aria-label="Show order status analytics"
-          >
-            Status
-          </button>
-          <button
-            onClick={() => handleTabChange('customers')}
-            className={`px-3 sm:px-4 py-1.5 sm:py-2 text-xs sm:text-sm rounded-md ${activeTab === 'customers' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'} min-w-[80px]`}
-            aria-label="Show customer analytics"
-          >
-            Customers
-          </button>
-        </div>
-
-        <motion.div
-          key={activeTab}
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ duration: 0.3 }}
-          className="min-h-[16rem] sm:min-h-[20rem] md:min-h-[24rem]"
-        >
-          {error ? (
-            <div className="bg-red-100 border border-red-400 text-red-700 p-4 rounded-lg">
-              <p>{error}</p>
-              <button
-                onClick={refetch}
-                className="mt-2 bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 min-w-[80px]"
-              >
-                Retry
-              </button>
-            </div>
-          ) : activeTab === 'overview' ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6">
-              <div>
-                <h4 className="text-sm sm:text-base md:text-lg font-medium mb-2 sm:mb-3 flex items-center">
-                  Sales Trend
-                  <span className="ml-2 text-xs sm:text-sm text-gray-500">
-                    ({timeRange === 'monthly' ? 'Monthly' : 'Weekly'})
-                  </span>
-                </h4>
-                <div className="h-40 sm:h-64 md:h-80">
-                  <Line data={salesData} options={chartOptions.line} />
-                </div>
-                <p className="text-xs sm:text-sm text-gray-500 mt-2 sm:mt-3">
-                  Sales performance over time for {filterType === 'delivered' ? 'delivered' : 'all'} orders.
-                </p>
-              </div>
-              <div>
-                <h4 className="text-sm sm:text-base md:text-lg font-medium mb-2 sm:mb-3 flex items-center">
-                  Order Volume
-                  <span className="ml-2 text-xs sm:text-sm text-gray-500">
-                    ({timeRange === 'monthly' ? 'Monthly' : 'Weekly'})
-                  </span>
-                </h4>
-                <div className="h-40 sm:h-64 md:h-80">
-                  <Bar data={ordersData} options={chartOptions.bar} />
-                </div>
-                <p className="text-xs sm:text-sm text-gray-500 mt-2 sm:mt-3">
-                  Number of {filterType === 'delivered' ? 'delivered' : 'all'} orders received.
-                </p>
-              </div>
-            </div>
-          ) : activeTab === 'payments' ? (
-            <div>
-              <h4 className="text-sm sm:text-base md:text-lg font-medium mb-2 sm:mb-3">Payment Methods</h4>
-              <div className="h-40 sm:h-64 md:h-80">
-                <Pie data={paymentMethodData} options={chartOptions.pie} />
-              </div>
-              <p className="text-xs sm:text-sm text-gray-500 mt-2 sm:mt-3">
-                Payment methods preferred for {filterType === 'delivered' ? 'delivered' : 'all'} orders.
-              </p>
-            </div>
-          ) : activeTab === 'status' ? (
-            <div>
-              <h4 className="text-sm sm:text-base md:text-lg font-medium mb-2 sm:mb-3">Order Status</h4>
-              <div className="h-40 sm:h-64 md:h-80">
-                <Pie data={orderStatusData} options={chartOptions.pie} />
-              </div>
-              <p className="text-xs sm:text-sm text-gray-500 mt-2 sm:mt-3">
-                Current status of {filterType === 'delivered' ? 'delivered' : 'all'} orders.
-              </p>
-            </div>
-          ) : (
-            <div>
-              <h4 className="text-sm sm:text-base md:text-lg font-medium mb-2 sm:mb-3">Customer Acquisition</h4>
-              <div className="h-40 sm:h-64 md:h-80">
-                <Pie data={customerData} options={chartOptions.pie} />
-              </div>
-              <p className="text-xs sm:text-sm text-gray-500 mt-2 sm:mt-3">
-                Unique customers vs. total {filterType === 'delivered' ? 'delivered' : 'all'} orders.
-              </p>
-            </div>
-          )}
-        </motion.div>
-      </div>
-
-      <div className="grid grid-cols-1 gap-4 sm:gap-6">
-        <div className="bg-white rounded-lg sm:rounded-xl shadow-sm p-3 sm:p-4 md:p-6">
-          <TopSellingPhones orders={filteredOrders} /> 
-        </div>
-      </div>
+function Panel({ title, subtitle, action, children, className = '' }) {
+  return <section className={`rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5 ${className}`}>
+    <div className="mb-4 flex flex-wrap items-start justify-between gap-2">
+      <div><h3 className="font-semibold text-slate-900">{title}</h3>{subtitle && <p className="mt-1 text-xs text-slate-500">{subtitle}</p>}</div>
+      {action}
     </div>
-  );
-};
+    {children}
+  </section>;
+}
 
-export default AnalyticsDashboard;
+function MetricCard({ label, value, change, icon: Icon, accent = 'blue', helper }) {
+  const accents = {
+    blue: 'bg-blue-50 text-blue-700', green: 'bg-emerald-50 text-emerald-700',
+    violet: 'bg-violet-50 text-violet-700', amber: 'bg-amber-50 text-amber-700',
+    rose: 'bg-rose-50 text-rose-700', cyan: 'bg-cyan-50 text-cyan-700',
+  };
+  const hasChange = change !== undefined && change !== null;
+  const positive = Number(change) >= 0;
+  return <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+    <div className="flex items-start justify-between gap-2">
+      <div className="min-w-0"><p className="text-xs font-medium text-slate-500">{label}</p><p className="mt-2 break-words text-xl font-bold tracking-tight text-slate-950 sm:text-2xl">{value}</p></div>
+      <span className={`rounded-xl p-2.5 ${accents[accent] || accents.blue}`}><Icon size={18} /></span>
+    </div>
+    <div className="mt-3 flex min-h-5 items-center justify-between gap-2">
+      {hasChange ? <span className={`inline-flex items-center gap-1 text-xs font-semibold ${positive ? 'text-emerald-700' : 'text-rose-700'}`}>{positive ? <FiArrowUpRight /> : <FiArrowDownRight />}{positive ? '+' : ''}{change}% vs previous period</span> : <span className="text-xs text-slate-400">{helper || 'Selected period'}</span>}
+    </div>
+  </div>;
+}
+
+function Empty({ children = 'No data available for this period yet.' }) {
+  return <div className="flex min-h-44 items-center justify-center rounded-xl bg-slate-50 px-4 text-center text-sm text-slate-500">{children}</div>;
+}
+
+function DoughnutPanel({ title, subtitle, rows, labelKey, valueKey }) {
+  const labels = (rows || []).map(row => String(row[labelKey] || 'Unknown').replaceAll('_', ' '));
+  const values = (rows || []).map(row => Number(row[valueKey] || 0));
+  const hasData = values.some(value => value > 0);
+  const options = { responsive: true, maintainAspectRatio: false, cutout: '66%', plugins: { legend: { position: 'bottom', labels: { usePointStyle: true, boxWidth: 8, padding: 16, color: '#475569' } } } };
+  return <Panel title={title} subtitle={subtitle}>{hasData ? <div className="h-64"><Doughnut data={{ labels, datasets: [{ data: values, backgroundColor: palette, borderWidth: 0, hoverOffset: 5 }] }} options={options} /></div> : <Empty />}</Panel>;
+}
+
+export default function AnalyticsChart() {
+  const [range, setRange] = useState('30d');
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState('');
+
+  const load = useCallback(async ({ quiet = false } = {}) => {
+    if (quiet) setRefreshing(true); else setLoading(true);
+    setError('');
+    try {
+      const response = await api.get('/admin/analytics/overview/', { params: { range, _ts: Date.now() } });
+      setData(response.data || null);
+    } catch (err) {
+      const message = err.response?.data?.detail || 'Unable to load store analytics.';
+      setError(message);
+      if (quiet) toast.error(message);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, [range]);
+
+  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    const timer = setInterval(() => { if (document.visibilityState === 'visible') load({ quiet: true }); }, 60000);
+    const onVisible = () => { if (document.visibilityState === 'visible') load({ quiet: true }); };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => { clearInterval(timer); document.removeEventListener('visibilitychange', onVisible); };
+  }, [load]);
+
+  const kpis = data?.kpis || {};
+  const daily = data?.daily || [];
+  const dateLabels = useMemo(() => daily.map(row => new Date(`${row.date}T00:00:00`).toLocaleDateString('en-GH', { day: 'numeric', month: 'short' })), [daily]);
+  const trendOptions = useMemo(() => ({ ...baseChartOptions, plugins: { ...baseChartOptions.plugins, tooltip: { ...baseChartOptions.plugins.tooltip, callbacks: { label: context => context.dataset.label === 'Collected revenue' ? money(context.raw) : number(context.raw) } } } }), []);
+  const salesChart = useMemo(() => ({ labels: dateLabels, datasets: [{ label: 'Collected revenue', data: daily.map(row => Number(row.revenue || 0)), borderColor: '#3157D5', backgroundColor: 'rgba(49,87,213,.10)', fill: true, tension: .35, pointRadius: 2, pointHoverRadius: 5 }] }), [dateLabels, daily]);
+  const visitorsChart = useMemo(() => ({ labels: dateLabels, datasets: [{ label: 'Visitors', data: daily.map(row => row.visitors || 0), borderColor: '#0F9F83', backgroundColor: 'rgba(15,159,131,.10)', fill: true, tension: .35, pointRadius: 2 }] }), [dateLabels, daily]);
+  const ordersChart = useMemo(() => ({ labels: dateLabels, datasets: [{ label: 'Orders', data: daily.map(row => row.orders || 0), backgroundColor: '#8B5CF6', borderRadius: 5, maxBarThickness: 22 }] }), [dateLabels, daily]);
+  const funnelRows = data?.funnel || [];
+  const funnelChart = useMemo(() => ({ labels: funnelRows.map(row => String(row.event).replaceAll('_', ' ')), datasets: [{ label: 'Unique visitors', data: funnelRows.map(row => row.unique_visitors || 0), backgroundColor: ['#3157D5', '#4773E6', '#16A085', '#F59E0B', '#8B5CF6'], borderRadius: 6, maxBarThickness: 34 }] }), [funnelRows]);
+  const topProducts = data?.top_products || [];
+  const productChart = useMemo(() => ({ labels: topProducts.slice(0, 8).map(row => row.product), datasets: [{ label: 'Collected revenue', data: topProducts.slice(0, 8).map(row => Number(row.revenue || 0)), backgroundColor: '#3157D5', borderRadius: 5 }] }), [topProducts]);
+  const regions = data?.regions || [];
+  const regionChart = useMemo(() => ({ labels: regions.map(row => row.region || 'Not specified'), datasets: [{ label: 'Orders', data: regions.map(row => row.orders || 0), backgroundColor: '#0F9F83', borderRadius: 5 }] }), [regions]);
+  const horizontalOptions = useMemo(() => ({ ...baseChartOptions, indexAxis: 'y', scales: { x: { beginAtZero: true, grid: { color: '#EEF2F7' }, ticks: { color: '#64748B' } }, y: { grid: { display: false }, ticks: { color: '#475569' } } } }), []);
+  const rangeLabel = { '7d': 'Last 7 days', '30d': 'Last 30 days', '90d': 'Last 90 days', '12m': 'Last 12 months' }[range];
+
+  if (loading && !data) return <div className="space-y-5"><div className="h-24 animate-pulse rounded-2xl bg-slate-200"/><div className="grid grid-cols-2 gap-3 lg:grid-cols-4">{Array.from({ length: 8 }).map((_, i) => <div key={i} className="h-28 animate-pulse rounded-2xl bg-slate-200"/>)}</div><div className="grid gap-4 lg:grid-cols-2"><div className="h-80 animate-pulse rounded-2xl bg-slate-200"/><div className="h-80 animate-pulse rounded-2xl bg-slate-200"/></div></div>;
+
+  return <div className="space-y-5 sm:space-y-6">
+    <div className="overflow-hidden rounded-2xl bg-gradient-to-br from-slate-950 via-blue-950 to-indigo-900 p-5 text-white shadow-lg sm:p-7">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div><p className="text-xs font-semibold uppercase tracking-[.18em] text-blue-200">Business intelligence</p><h2 className="mt-2 text-2xl font-bold tracking-tight sm:text-3xl">Store analytics</h2><p className="mt-2 max-w-2xl text-sm text-blue-100">A complete view of sales, visitors, guest customers, product interest and where your orders come from.</p></div>
+        <div className="flex items-center gap-2"><select value={range} onChange={event => setRange(event.target.value)} className="rounded-lg border border-white/20 bg-white/10 px-3 py-2 text-sm text-white outline-none [&>option]:text-slate-900"><option value="7d">7 days</option><option value="30d">30 days</option><option value="90d">90 days</option><option value="12m">12 months</option></select><button onClick={() => load({ quiet: true })} disabled={refreshing} className="inline-flex items-center gap-2 rounded-lg bg-white px-3 py-2 text-sm font-semibold text-slate-900 hover:bg-blue-50 disabled:opacity-60"><FiRefreshCw className={refreshing ? 'animate-spin' : ''}/>Refresh</button></div>
+      </div>
+      <div className="mt-5 flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-blue-100"><span className="inline-flex items-center gap-1.5"><FiCalendar/>{rangeLabel}</span><span>Revenue includes paid orders and COD orders marked cash collected</span>{data?.generated_at && <span>Updated {new Date(data.generated_at).toLocaleTimeString('en-GH', { hour: '2-digit', minute: '2-digit' })}</span>}</div>
+    </div>
+
+    {error && <div className="flex items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700"><FiAlertCircle/>{error}<button onClick={() => load()} className="ml-auto font-semibold underline">Retry</button></div>}
+
+    <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+      <MetricCard label="Collected revenue" value={money(kpis.collected_revenue)} change={kpis.revenue_change_percent} icon={FiDollarSign} accent="green" />
+      <MetricCard label="Orders placed" value={number(kpis.orders)} change={kpis.orders_change_percent} icon={FiShoppingBag} accent="blue" />
+      <MetricCard label="Average order value" value={money(kpis.average_order_value)} icon={FiTarget} accent="violet" helper="Collected revenue ÷ collected orders" />
+      <MetricCard label="Unique visitors" value={number(kpis.visitors)} change={kpis.visitors_change_percent} icon={FiEye} accent="cyan" />
+      <MetricCard label="Page views" value={number(kpis.page_views)} icon={FiActivity} accent="amber" />
+      <MetricCard label="Purchase conversion" value={percent(kpis.conversion_rate)} icon={FiBarChart2} accent="green" helper="Tracked purchase visitors ÷ visitors" />
+      <MetricCard label="Repeat customers" value={number(kpis.repeat_customers)} icon={FiUsers} accent="violet" helper={`${percent(kpis.repeat_rate)} of active guest customers`} />
+      <MetricCard label="Cancellation rate" value={percent(kpis.cancellation_rate)} icon={FiAlertCircle} accent="rose" helper={`${number(kpis.cancelled_orders)} cancelled orders`} />
+    </div>
+
+    <div className="grid gap-4 xl:grid-cols-2">
+      <Panel title="Collected revenue trend" subtitle="Daily revenue from successfully paid orders and collected COD orders"><div className="h-72">{daily.length ? <Line data={salesChart} options={trendOptions}/> : <Empty/>}</div></Panel>
+      <Panel title="Visitor trend" subtitle="Daily unique anonymous browser visitors (bots excluded)"><div className="h-72">{daily.length ? <Line data={visitorsChart} options={baseChartOptions}/> : <Empty/>}</div></Panel>
+      <Panel title="Order volume" subtitle="Orders created during the selected period"><div className="h-64">{daily.length ? <Bar data={ordersChart} options={baseChartOptions}/> : <Empty/>}</div></Panel>
+      <Panel title="Sales funnel" subtitle="Unique browser identifiers at each tracked shopping step"><div className="h-64">{funnelRows.some(row => row.unique_visitors > 0) ? <Bar data={funnelChart} options={horizontalOptions}/> : <Empty>Funnel data will appear as storefront product, cart, checkout and purchase events are tracked.</Empty>}</div><p className="mt-2 text-xs text-slate-400">Funnel counts are event-based and may include visitors who did not complete the previous step.</p></Panel>
+    </div>
+
+    <div className="grid gap-4 xl:grid-cols-2">
+      <DoughnutPanel title="Payment methods" subtitle="How customers chose to pay" rows={data?.payment_split} labelKey="payment_method" valueKey="orders" />
+      <DoughnutPanel title="Order status mix" subtitle="Current status of orders created in this period" rows={data?.order_statuses} labelKey="status" valueKey="orders" />
+    </div>
+
+    <div className="grid gap-4 xl:grid-cols-2">
+      <Panel title="Top-selling products" subtitle="Ranked by collected sales value; no stock counts used"><div className="h-80">{topProducts.length ? <Bar data={productChart} options={horizontalOptions}/> : <Empty>No collected product sales in this period.</Empty>}</div></Panel>
+      <Panel title="Orders by region" subtitle="Delivery destinations for orders created in this period"><div className="h-80">{regions.length ? <Bar data={regionChart} options={horizontalOptions}/> : <Empty/>}</div></Panel>
+    </div>
+
+    <Panel title="Top customers" subtitle="Guest customers with the highest collected spend in this period">
+      {(data?.top_customers || []).length ? <div className="overflow-x-auto"><table className="w-full min-w-[560px] text-sm"><thead><tr className="border-b text-left text-xs uppercase tracking-wide text-slate-400"><th className="pb-3">Customer</th><th className="pb-3">Phone</th><th className="pb-3 text-right">Orders</th><th className="pb-3 text-right">Collected spend</th></tr></thead><tbody>{data.top_customers.map((customer, index) => <tr key={`${customer.phone}-${index}`} className="border-b border-slate-100 last:border-0"><td className="py-3 font-medium text-slate-800">{customer.name || 'Guest customer'}</td><td className="py-3 text-slate-600">{customer.phone}</td><td className="py-3 text-right">{number(customer.orders)}</td><td className="py-3 text-right font-semibold">{money(customer.revenue)}</td></tr>)}</tbody></table></div> : <Empty>No collected customer spend in this period.</Empty>}
+    </Panel>
+
+    <div className="grid gap-4 xl:grid-cols-3">
+      <Panel title="Customer insights" subtitle="Guest customers identified by checkout phone number">
+        <div className="grid grid-cols-2 gap-3">
+          <MiniStat label="All-time customers" value={kpis.all_customers}/><MiniStat label="Active this period" value={kpis.active_customers}/><MiniStat label="First-time customers" value={kpis.new_customers}/><MiniStat label="Repeat customers" value={kpis.repeat_customers}/><MiniStat label="Orders per customer" value={kpis.orders_per_customer}/><MiniStat label="Revenue per visitor" value={money(kpis.revenue_per_visitor)}/>
+        </div><div className="mt-4 rounded-xl bg-violet-50 p-3"><p className="text-xs text-violet-700">Repeat customer rate</p><p className="mt-1 text-2xl font-bold text-violet-950">{percent(kpis.repeat_rate)}</p></div>
+      </Panel>
+      <Panel title="Customer inbox" subtitle="Enquiries received in this period">
+        <div className="space-y-3"><MiniStat label="Total enquiries" value={data?.messages?.total}/><MiniStat label="New / unread" value={data?.messages?.new}/><MiniStat label="Replied" value={data?.messages?.replied}/></div>
+      </Panel>
+      <Panel title="Traffic sources" subtitle="Campaign tags from your storefront">
+        {(data?.sources || []).length ? <div className="space-y-3">{data.sources.slice(0, 6).map((source, index) => <div key={`${source.utm_source}-${source.utm_medium}-${index}`} className="flex items-center justify-between gap-3 border-b border-slate-100 pb-2 last:border-0"><div className="min-w-0"><p className="truncate text-sm font-medium capitalize text-slate-800">{source.utm_source}</p><p className="truncate text-xs text-slate-400">{[source.utm_medium, source.utm_campaign].filter(Boolean).join(' · ') || 'No campaign details'}</p></div><span className="text-sm font-semibold text-slate-700">{number(source.visits)}</span></div>)}</div> : <Empty>No tagged campaign traffic yet.</Empty>}
+      </Panel>
+    </div>
+
+    <Panel title="Product demand signals" subtitle="Customer interest compared with guest orders — deliberately independent of stock quantities">
+      {(data?.demand_signals || []).length ? <div className="overflow-x-auto"><table className="w-full min-w-[680px] text-sm"><thead><tr className="border-b text-left text-xs uppercase tracking-wide text-slate-400"><th className="pb-3">Product</th><th className="pb-3 text-right">Views</th><th className="pb-3 text-right">Visitors</th><th className="pb-3 text-right">Cart adds</th><th className="pb-3 text-right">Orders</th><th className="pb-3 text-right">Units</th><th className="pb-3 text-right">Signal</th></tr></thead><tbody>{data.demand_signals.map(item => <tr key={item.phone_id} className="border-b border-slate-100 last:border-0"><td className="py-3 font-medium text-slate-800">{item.product}</td><td className="py-3 text-right">{number(item.views)}</td><td className="py-3 text-right">{number(item.unique_visitors)}</td><td className="py-3 text-right">{number(item.cart_adds)}</td><td className="py-3 text-right">{number(item.orders)}</td><td className="py-3 text-right">{number(item.units)}</td><td className="py-3 text-right"><span className="inline-flex rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-700">{item.signal}</span></td></tr>)}</tbody></table></div> : <Empty>Product demand will populate once product_view and add_to_cart events include a phone ID.</Empty>}
+    </Panel>
+
+    <div className="grid gap-4 xl:grid-cols-2">
+      <Panel title="Top referring websites" subtitle="External referrers recorded with page visits">{(data?.referrers || []).length ? <div className="space-y-2">{data.referrers.map((row, index) => <div key={`${row.referrer}-${index}`} className="flex items-center justify-between gap-3 border-b border-slate-100 py-2 last:border-0"><span className="truncate text-sm text-slate-700">{row.referrer}</span><b className="text-sm text-slate-900">{number(row.visits)}</b></div>)}</div> : <Empty>No referrer information recorded yet.</Empty>}</Panel>
+      <Panel title="Analytics notes" subtitle="How to interpret the numbers">
+        <ul className="space-y-2 text-sm leading-6 text-slate-600"><li>• Revenue counts paid online orders and COD orders marked as cash collected; unpaid orders are excluded.</li><li>• Customers are grouped by the phone number entered at guest checkout, not by user accounts.</li><li>• Unique visitors use the anonymous browser identifier, with hashed IP fallback for older visits without one.</li><li>• Funnel conversion uses tracked purchase events. It becomes meaningful once the storefront sends all funnel events consistently.</li><li>• Product demand uses views, cart additions and non-cancelled guest orders. It does not use inventory stock.</li></ul>
+      </Panel>
+    </div>
+    <p className="text-right text-xs text-slate-400">Analytics refresh automatically every minute while this page is open.</p>
+  </div>;
+}
+
+function MiniStat({ label, value }) {
+  return <div className="rounded-xl bg-slate-50 p-3"><p className="text-xs text-slate-500">{label}</p><p className="mt-1 text-xl font-bold text-slate-900">{number(value)}</p></div>;
+}

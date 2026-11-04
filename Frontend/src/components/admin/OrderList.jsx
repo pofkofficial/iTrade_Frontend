@@ -8,6 +8,7 @@ import {
   FiChevronRight, 
   FiFilter,
   FiSearch,
+  FiRefreshCw,
   FiCircle,
   FiPackage,
   FiCheckSquare
@@ -22,6 +23,8 @@ import api from '@utils/api';
 
 const statusBadgeClass = {
   pending: 'bg-gray-100 text-gray-800',
+  confirmed: 'bg-indigo-100 text-indigo-800',
+  out_for_delivery: 'bg-amber-100 text-amber-800',
   shipped: 'bg-blue-100 text-blue-800',
   delivered: 'bg-green-100 text-green-800',
   cancelled: 'bg-red-100 text-red-800'
@@ -37,6 +40,8 @@ const paymentMethodColors = {
 const statusOptions = [
   { value: 'all', label: 'All Statuses' },
   { value: 'pending', label: 'Pending' },
+  { value: 'confirmed', label: 'Confirmed' },
+  { value: 'out_for_delivery', label: 'Out for delivery' },
   { value: 'shipped', label: 'Shipped' },
   { value: 'delivered', label: 'Delivered' },
   { value: 'cancelled', label: 'Cancelled' }
@@ -44,6 +49,8 @@ const statusOptions = [
 
 const bulkStatusOptions = [
   { value: 'pending', label: 'Pending' },
+  { value: 'confirmed', label: 'Confirmed' },
+  { value: 'out_for_delivery', label: 'Out for delivery' },
   { value: 'shipped', label: 'Shipped' },
   { value: 'delivered', label: 'Delivered' },
   { value: 'cancelled', label: 'Cancelled' }
@@ -80,7 +87,7 @@ const SkeletonRow = () => (
   </tr>
 );
 
-const OrderList = ({ initialOrders = null, disableFetch = false }) => {
+const OrderList = ({ compact = false }) => {
   const { user, loading: authLoading } = useAuth();
   const navigate = useNavigate();
   const [viewedOrders, setViewedOrders] = useState(new Set());
@@ -91,63 +98,34 @@ const OrderList = ({ initialOrders = null, disableFetch = false }) => {
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [selectedOrders, setSelectedOrders] = useState(new Set());
   const [bulkStatus, setBulkStatus] = useState('');
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [statusOverrides, setStatusOverrides] = useState({});
 
   const params = useMemo(() => ({
     page: currentPage,
+    page_size: 10,
     search: searchTerm,
-    status: statusFilter !== 'all' ? statusFilter : undefined,
-    ordering: `${sortConfig.direction === 'desc' ? '-' : ''}${sortConfig.key}`
-  }), [currentPage, searchTerm, statusFilter, sortConfig]);
+    status: compact ? 'pending' : (statusFilter !== 'all' ? statusFilter : undefined),
+    ordering: compact ? '-created_at' : `${sortConfig.direction === 'desc' ? '-' : ''}${sortConfig.key}`
+  }), [compact, currentPage, searchTerm, statusFilter, sortConfig]);
 
   const { data, loading, error, refetch } = useFetch(
-    disableFetch ? null : '/orders/',
+    '/orders/',
     { params },
-    [currentPage, searchTerm, statusFilter, sortConfig, disableFetch]
+    [currentPage, searchTerm, statusFilter, sortConfig, refreshKey, compact]
   );
 
-  const orders = useMemo(() => {
-    if (disableFetch && initialOrders) {
-      let filteredOrders = [...initialOrders];
-      if (searchTerm) {
-        filteredOrders = filteredOrders.filter(order =>
-          (order.customer_name?.toLowerCase() || '').includes(searchTerm.toLowerCase()) ||
-          (order.order_number?.toLowerCase() || '').includes(searchTerm.toLowerCase()) ||
-          (order.customer_email?.toLowerCase() || '').includes(searchTerm.toLowerCase())
-        );
-      }
-      if (statusFilter !== 'all') {
-        filteredOrders = filteredOrders.filter(order => order.status === statusFilter);
-      }
-      filteredOrders.sort((a, b) => {
-        const aValue = a[sortConfig.key] || '';
-        const bValue = b[sortConfig.key] || '';
-        if (aValue < bValue) return sortConfig.direction === 'asc' ? -1 : 1;
-        if (aValue > bValue) return sortConfig.direction === 'asc' ? 1 : -1;
-        return 0;
-      });
-      const startIndex = (currentPage - 1) * 10;
-      return filteredOrders.slice(startIndex, startIndex + 10);
-    }
-    return data?.results || data || [];
-  }, [data, initialOrders, disableFetch, searchTerm, statusFilter, sortConfig, currentPage]);
+  useEffect(() => {
+    if (!compact) return undefined;
+    const timer = setInterval(() => { if (document.visibilityState === 'visible') setRefreshKey(value => value + 1); }, 15000);
+    return () => clearInterval(timer);
+  }, [compact]);
 
-  const totalPages = useMemo(() => {
-    if (disableFetch && initialOrders) {
-      let filteredOrders = [...initialOrders];
-      if (searchTerm) {
-        filteredOrders = filteredOrders.filter(order =>
-          (order.customer_name?.toLowerCase() || '').includes(searchTerm.toLowerCase()) ||
-          (order.order_number?.toLowerCase() || '').includes(searchTerm.toLowerCase()) ||
-          (order.customer_email?.toLowerCase() || '').includes(searchTerm.toLowerCase())
-        );
-      }
-      if (statusFilter !== 'all') {
-        filteredOrders = filteredOrders.filter(order => order.status === statusFilter);
-      }
-      return Math.ceil(filteredOrders.length / 10) || 1;
-    }
-    return Math.ceil(data?.count / 10) || 1;
-  }, [data, initialOrders, disableFetch, searchTerm, statusFilter]);
+  const orders = useMemo(() => (data?.results || data || [])
+    .map(order => statusOverrides[order.id] ? { ...order, status: statusOverrides[order.id] } : order)
+    .filter(order => !compact || order.status === 'pending'), [data, statusOverrides, compact]);
+
+  const totalPages = useMemo(() => Math.ceil((data?.count || orders.length) / 10) || 1, [data, orders.length]);
 
   useEffect(() => {
     const storedViewedOrders = localStorage.getItem('viewedOrders');
@@ -195,7 +173,8 @@ const OrderList = ({ initialOrders = null, disableFetch = false }) => {
         }
       });
       setSelectedOrder(prev => (prev?.id === orderId ? { ...prev, status: newStatus } : prev));
-      refetch();
+      setStatusOverrides(prev => ({ ...prev, [orderId]: newStatus }));
+      setRefreshKey(value => value + 1);
       toast.success(`Order #${orderId} status updated to ${newStatus}`);
     } catch (err) {
       const errorMsg = err.response?.data?.error || err.response?.data?.message || 'Failed to update order status';
@@ -212,11 +191,8 @@ const OrderList = ({ initialOrders = null, disableFetch = false }) => {
           <button
             onClick={async () => {
               try {
-                if (!disableFetch) {
-                  const response = await api.delete(`/orders/${orderId}/`);
-                  console.log('Delete response:', response);
-                  refetch();
-                }
+                await api.delete(`/orders/${orderId}/`);
+                refetch();
                 if (selectedOrder?.id === orderId) {
                   setSelectedOrder(null);
                 }
@@ -253,7 +229,7 @@ const OrderList = ({ initialOrders = null, disableFetch = false }) => {
       </div>,
       { autoClose: false }
     );
-  }, [disableFetch, refetch, selectedOrder]);
+  }, [refetch, selectedOrder]);
 
   const handleBulkDelete = useCallback(() => {
     if (selectedOrders.size === 0) {
@@ -267,12 +243,11 @@ const OrderList = ({ initialOrders = null, disableFetch = false }) => {
           <button
             onClick={async () => {
               try {
-                if (!disableFetch) {
-                  for (const orderId of selectedOrders) {
-                    await api.delete(`/orders/${orderId}/`);
-                  }
-                  refetch();
+                for (const orderId of selectedOrders) {
+                  await api.delete(`/orders/${orderId}/`);
                 }
+                setStatusOverrides(prev => { const next = { ...prev }; selectedOrders.forEach(id => { next[id] = bulkStatus; }); return next; });
+                setRefreshKey(value => value + 1);
                 if (selectedOrder && selectedOrders.has(selectedOrder.id)) {
                   setSelectedOrder(null);
                 }
@@ -305,7 +280,7 @@ const OrderList = ({ initialOrders = null, disableFetch = false }) => {
       </div>,
       { autoClose: false }
     );
-  }, [disableFetch, refetch, selectedOrder, selectedOrders]);
+  }, [refetch, selectedOrder, selectedOrders]);
 
   const handleBulkStatusChange = useCallback(() => {
     if (selectedOrders.size === 0) {
@@ -323,14 +298,13 @@ const OrderList = ({ initialOrders = null, disableFetch = false }) => {
           <button
             onClick={async () => {
               try {
-                if (!disableFetch) {
-                  for (const orderId of selectedOrders) {
-                    await api.patch(`/orders/${orderId}/`, { status: bulkStatus }, {
-                      headers: { 'Content-Type': 'application/json', 'Authorization': `Token ${localStorage.getItem('token')}` }
-                    });
-                  }
-                  refetch();
+                for (const orderId of selectedOrders) {
+                  await api.patch(`/orders/${orderId}/`, { status: bulkStatus }, {
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Token ${localStorage.getItem('token')}` }
+                  });
                 }
+                setStatusOverrides(prev => { const next = { ...prev }; selectedOrders.forEach(id => { next[id] = bulkStatus; }); return next; });
+                setRefreshKey(value => value + 1);
                 if (selectedOrder && selectedOrders.has(selectedOrder.id)) {
                   setSelectedOrder(prev => ({ ...prev, status: bulkStatus }));
                 }
@@ -359,7 +333,7 @@ const OrderList = ({ initialOrders = null, disableFetch = false }) => {
       </div>,
       { autoClose: false }
     );
-  }, [disableFetch, refetch, selectedOrder, selectedOrders, bulkStatus]);
+  }, [refetch, selectedOrder, selectedOrders, bulkStatus]);
 
   const handleSelectOrder = useCallback((orderId) => {
     setSelectedOrders(prev => {
@@ -431,7 +405,7 @@ const OrderList = ({ initialOrders = null, disableFetch = false }) => {
   return (
     <div className="bg-white shadow rounded-lg p-4 sm:p-6">
       <div className="mb-4 sm:mb-6 flex flex-col gap-4">
-        <h2 className="text-xl sm:text-2xl font-bold text-gray-800">Order Management</h2>
+        <div className="flex items-center justify-between gap-3"><h2 className="text-xl sm:text-2xl font-bold text-gray-800">{compact ? 'New Orders' : 'Order Management'}</h2><button onClick={() => setRefreshKey(value => value + 1)} disabled={loading} className="inline-flex items-center gap-2 rounded-md border px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50" title="Refresh orders"><FiRefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />{compact ? 'Refresh' : 'Refresh orders'}</button></div>
         <div className="flex flex-col sm:flex-row gap-2 sm:gap-3 w-full">
           <div className="relative flex-1">
             <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
@@ -506,14 +480,12 @@ const OrderList = ({ initialOrders = null, disableFetch = false }) => {
               </div>
               <div className="ml-3">
                 <p className="text-sm text-red-700">{error}</p>
-                {!disableFetch && (
-                  <button 
+                <button 
                     onClick={() => refetch()}
                     className="mt-2 text-sm text-red-700 underline"
                   >
                     Retry
                   </button>
-                )}
               </div>
             </div>
           </motion.div>
@@ -531,14 +503,12 @@ const OrderList = ({ initialOrders = null, disableFetch = false }) => {
           <p className="mt-1 text-xs sm:text-sm text-gray-500">
             {searchTerm || statusFilter !== 'all' ? 'Try adjusting your search or filter' : 'No orders have been placed yet'}
           </p>
-          {!disableFetch && (
-            <button
+          <button
               onClick={() => refetch()}
               className="mt-2 text-sm text-blue-600 hover:text-blue-800 underline"
             >
               Refresh
             </button>
-          )}
         </motion.div>
       ) : (
         <>
@@ -646,9 +616,13 @@ const OrderList = ({ initialOrders = null, disableFetch = false }) => {
                       <td className="px-3 sm:px-6 py-3 whitespace-nowrap">
                         <div className="text-xs sm:text-sm text-gray-900">{order.customer_name || 'N/A'}</div>
                         <div className="text-xs text-gray-500">{order.customer_email || 'N/A'}</div>
+                        {order.customer_phone_number && <a href={`https://wa.me/${String(order.customer_phone_number).replace(/\D/g, '')}?text=${encodeURIComponent(`Hello ${order.customer_name || ''}, regarding order ${order.order_number || ''}.`)}`} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} className="text-xs text-green-700 hover:underline">WhatsApp customer</a>}
                       </td>
                       <td className="px-3 sm:px-6 py-3 whitespace-nowrap text-xs sm:text-sm text-gray-500 hidden xs:table-cell">
-                        {formatDate(order.created_at)}
+                        <div>{formatDate(order.created_at)}</div>
+                        {order.status === 'pending' && (Date.now() - new Date(order.created_at).getTime()) > 86400000 && (
+                          <span className="mt-1 inline-flex rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-semibold text-red-700">Over 24 hours</span>
+                        )}
                       </td>
                       <td className="px-3 sm:px-6 py-3 whitespace-nowrap hidden sm:table-cell">
                         <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${paymentMethodColors[order.payment_method] || 'bg-gray-100 text-gray-800'}`}>
@@ -667,6 +641,8 @@ const OrderList = ({ initialOrders = null, disableFetch = false }) => {
                           onClick={(e) => e.stopPropagation()}
                         >
                           <option value="pending">Pending</option>
+                          <option value="confirmed">Confirmed</option>
+                          <option value="out_for_delivery">Out for delivery</option>
                           <option value="shipped">Shipped</option>
                           <option value="delivered">Delivered</option>
                           <option value="cancelled">Cancelled</option>
@@ -723,7 +699,7 @@ const OrderList = ({ initialOrders = null, disableFetch = false }) => {
             <div className="text-xs sm:text-sm text-gray-700">
               Showing <span className="font-medium">{(currentPage - 1) * 10 + 1}</span> to{' '}
               <span className="font-medium">{(currentPage - 1) * 10 + orders.length}</span> of{' '}
-              <span className="font-medium">{data?.count || (disableFetch ? initialOrders?.length : orders.length)}</span> results
+              <span className="font-medium">{data?.count || orders.length}</span> results
             </div>
             <div className="flex space-x-1 sm:space-x-2">
               <button

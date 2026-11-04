@@ -3,18 +3,26 @@ import {
   FiHome, 
   FiSmartphone, 
   FiBarChart2, 
-  FiPlus,
+  FiShoppingBag, FiCreditCard, FiLayers, FiUsers, FiTruck,
   FiLogOut, 
-  FiX 
+  FiX, FiSettings, FiShield, FiInbox 
 } from 'react-icons/fi';
 import { useAuth } from '../../context/AuthContext';
 
-const AdminSidebar = ({ activeView, setActiveView, onNavigate }) => {
+const AdminSidebar = ({ activeView, setActiveView, onNavigate, pendingCount = 0, newMessagesCount = 0 }) => {
   const { logout } = useAuth();
   const menuItems = [
     { icon: <FiHome size={20} />, label: 'Dashboard', view: 'dashboard' },
     { icon: <FiSmartphone size={20} />, label: 'Phones', view: 'phones' },
+    { icon: <FiShoppingBag size={20} />, label: 'Orders', view: 'orders', count: pendingCount },
+    { icon: <FiCreditCard size={20} />, label: 'Payments', view: 'payments' },
+    { icon: <FiLayers size={20} />, label: 'Bulk Variants', view: 'variants' },
+    { icon: <FiUsers size={20} />, label: 'Customers', view: 'customers' },
+    { icon: <FiTruck size={20} />, label: 'Delivery Sheet', view: 'deliveries' },
     { icon: <FiBarChart2 size={20} />, label: 'Analytics', view: 'analytics' },
+    { icon: <FiInbox size={20} />, label: 'Customer Inbox', view: 'inbox', count: newMessagesCount },
+    { icon: <FiShield size={20} />, label: 'Security & Audit', view: 'security' },
+    { icon: <FiSettings size={20} />, label: 'Store Controls', view: 'store' },
   ];
 
   const handleNavigation = (view) => {
@@ -41,7 +49,7 @@ const AdminSidebar = ({ activeView, setActiveView, onNavigate }) => {
           <h1 className="text-xl md:text-2xl font-bold">iTrade Admin</h1>
         </div>
         
-        <nav className="flex-1">
+        <nav className="flex-1 overflow-y-auto">
           <ul className="space-y-1 md:space-y-2">
             {menuItems.map((item) => (
               <motion.li 
@@ -57,7 +65,8 @@ const AdminSidebar = ({ activeView, setActiveView, onNavigate }) => {
                       : 'hover:bg-blue-600 hover:shadow-md'}`}
                 >
                   <span className="mr-3 flex-shrink-0">{item.icon}</span>
-                  <span className="text-sm md:text-base">{item.label}</span>
+                  <span className="text-sm md:text-base flex-1">{item.label}</span>
+                  {item.count > 0 && <span className="ml-2 min-w-5 h-5 px-1 rounded-full bg-red-500 text-white text-xs flex items-center justify-center">{item.count > 99 ? '99+' : item.count}</span>}
                 </button>
               </motion.li>
             ))}

@@ -116,13 +116,13 @@ api.interceptors.response.use(
       });
     }
 
-    // Log performance for non-cached requests
+    /* Log performance for non-cached requests
     if (config.metadata?.startTime && !config.fromCache) {
       const duration = Date.now() - config.metadata.startTime;
       if (duration > 1000) { // Log slow requests
         console.warn(`Slow API request: ${config.url} took ${duration}ms`);
       }
-    }
+    }*/
 
     return response;
   },

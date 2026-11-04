@@ -68,7 +68,7 @@ const SkeletonRow = () => (
   </tr>
 );
 
-const MessageList = ({ initialMessages = null, disableFetch = false }) => {
+const MessageList = ({ compact = false }) => {
   const { user, loading: authLoading, error: authError } = useAuth();
   const navigate = useNavigate();
   const [currentPage, setCurrentPage] = useState(1);
@@ -77,23 +77,31 @@ const MessageList = ({ initialMessages = null, disableFetch = false }) => {
   const [sortConfig, setSortConfig] = useState({ key: 'created_at', direction: 'desc' });
   const [selectedMessage, setSelectedMessage] = useState(null);
   const [selectedMessages, setSelectedMessages] = useState([]);
-  const [localMessages, setLocalMessages] = useState(initialMessages || []);
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [statusOverrides, setStatusOverrides] = useState({});
 
   const params = useMemo(() => ({
     page: currentPage,
     search: searchTerm,
-    status: statusFilter !== 'all' ? statusFilter : undefined,
-    ordering: `${sortConfig.direction === 'desc' ? '-' : ''}${sortConfig.key}`
-  }), [currentPage, searchTerm, statusFilter, sortConfig]);
+    status: compact ? 'new' : (statusFilter !== 'all' ? statusFilter : undefined),
+    ordering: compact ? '-created_at' : `${sortConfig.direction === 'desc' ? '-' : ''}${sortConfig.key}`
+  }), [compact, currentPage, searchTerm, statusFilter, sortConfig]);
 
   const { data, loading, error, refetch } = useFetch(
-    disableFetch ? null : '/contact-messages/',
+    '/contact-messages/',
     { params },
-    [currentPage, searchTerm, statusFilter, sortConfig, disableFetch]
+    [currentPage, searchTerm, statusFilter, sortConfig, refreshKey, compact]
   );
 
+  useEffect(() => {
+    if (!compact) return undefined;
+    const timer = setInterval(() => { if (document.visibilityState === 'visible') setRefreshKey(value => value + 1); }, 15000);
+    return () => clearInterval(timer);
+  }, [compact]);
+
   const messages = useMemo(() => {
-    let messageList = disableFetch ? localMessages : (data?.results || data || []);
+    let messageList = (data?.results || data || []).map(message => statusOverrides[message.id] ? { ...message, status: statusOverrides[message.id] } : message);
+    if (compact) messageList = messageList.filter(message => message.status === 'new');
     if (searchTerm) {
       messageList = messageList.filter(message =>
         message.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -114,10 +122,11 @@ const MessageList = ({ initialMessages = null, disableFetch = false }) => {
     });
     const startIndex = (currentPage - 1) * 10;
     return messageList.slice(startIndex, startIndex + 10);
-  }, [data, localMessages, disableFetch, searchTerm, statusFilter, sortConfig, currentPage]);
+  }, [data, searchTerm, statusFilter, sortConfig, currentPage, compact, statusOverrides]);
 
   const totalPages = useMemo(() => {
-    let messageList = disableFetch ? localMessages : (data?.results || data || []);
+    let messageList = (data?.results || data || []).map(message => statusOverrides[message.id] ? { ...message, status: statusOverrides[message.id] } : message);
+    if (compact) messageList = messageList.filter(message => message.status === 'new');
     if (searchTerm) {
       messageList = messageList.filter(message =>
         message.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -130,7 +139,7 @@ const MessageList = ({ initialMessages = null, disableFetch = false }) => {
       messageList = messageList.filter(message => message.status === statusFilter);
     }
     return Math.ceil(messageList.length / 10) || 1;
-  }, [data, localMessages, disableFetch, searchTerm, statusFilter]);
+  }, [data, searchTerm, statusFilter, compact, statusOverrides]);
 
   useEffect(() => {
     if (!authLoading && !user) {
@@ -144,11 +153,7 @@ const MessageList = ({ initialMessages = null, disableFetch = false }) => {
     }
   }, [user, authLoading, authError, error, navigate]);
 
-  useEffect(() => {
-    if (disableFetch && initialMessages) {
-      setLocalMessages(initialMessages);
-    }
-  }, [disableFetch, initialMessages]);
+
 
   const debouncedSetSearchTerm = useCallback(
     debounce((value) => {
@@ -173,19 +178,15 @@ const MessageList = ({ initialMessages = null, disableFetch = false }) => {
 
   const updateStatus = useCallback(async (id, newStatus) => {
     try {
-      if (!disableFetch) {
-        await api.patch(`/contact-messages/${id}/`, { status: newStatus });
-        refetch();
-      } else {
-        setLocalMessages(prev => prev.map(msg => msg.id === id ? { ...msg, status: newStatus } : msg));
-        setSelectedMessage(prev => (prev?.id === id ? { ...prev, status: newStatus } : prev));
-      }
+      await api.patch(`/contact-messages/${id}/status/`, { status: newStatus });
+      setStatusOverrides(prev => ({ ...prev, [id]: newStatus }));
+      setRefreshKey(value => value + 1);
       toast.success(`Message ${id} status updated to ${newStatus}`);
     } catch (err) {
       const errorMessage = err.response?.data?.error || 'Failed to update message status';
       toast.error(errorMessage);
     }
-  }, [disableFetch, refetch]);
+  }, [refetch]);
 
   const deleteMessage = useCallback(async (id) => {
     toast(
@@ -195,12 +196,8 @@ const MessageList = ({ initialMessages = null, disableFetch = false }) => {
           <button
             onClick={async () => {
               try {
-                if (!disableFetch) {
-                  await api.delete(`/contact-messages/${id}/`);
-                  refetch();
-                } else {
-                  setLocalMessages(prev => prev.filter(msg => msg.id !== id));
-                }
+                await api.delete(`/contact-messages/${id}/`);
+                refetch();
                 if (selectedMessage?.id === id) {
                   setSelectedMessage(null);
                 }
@@ -227,27 +224,22 @@ const MessageList = ({ initialMessages = null, disableFetch = false }) => {
       </div>,
       { autoClose: false }
     );
-  }, [disableFetch, refetch, selectedMessage]);
+  }, [refetch, selectedMessage]);
 
   const bulkUpdateStatus = useCallback(async (newStatus) => {
     try {
-      if (!disableFetch) {
-        for (const id of selectedMessages) {
-          await api.patch(`/contact-messages/${id}/`, { status: newStatus });
-        }
-        refetch();
-      } else {
-        setLocalMessages(prev => 
-          prev.map(msg => selectedMessages.includes(msg.id) ? { ...msg, status: newStatus } : msg)
-        );
+      for (const id of selectedMessages) {
+        await api.patch(`/contact-messages/${id}/status/`, { status: newStatus });
       }
+      setStatusOverrides(prev => { const next = { ...prev }; selectedMessages.forEach(id => { next[id] = newStatus; }); return next; });
+      setRefreshKey(value => value + 1);
       setSelectedMessages([]);
       toast.success(`Updated ${selectedMessages.length} messages to ${newStatus}`);
     } catch (err) {
       const errorMessage = err.response?.data?.error || 'Failed to update selected messages';
       toast.error(errorMessage);
     }
-  }, [disableFetch, refetch, selectedMessages]);
+  }, [refetch, selectedMessages]);
 
   const bulkDelete = useCallback(() => {
     toast(
@@ -258,19 +250,15 @@ const MessageList = ({ initialMessages = null, disableFetch = false }) => {
             onClick={async () => {
               try {
                 const failedDeletions = [];
-                if (!disableFetch) {
-                  for (const id of selectedMessages) {
-                    try {
-                      await api.delete(`/contact-messages/${id}/`);
-                    } catch (err) {
-                      failedDeletions.push({ id, error: err.response?.data?.error || `Failed to delete message ${id}` });
-                      console.error(`Delete message ${id} failed:`, err.response?.status, err.response?.data);
-                    }
+                for (const id of selectedMessages) {
+                  try {
+                    await api.delete(`/contact-messages/${id}/`);
+                  } catch (err) {
+                    failedDeletions.push({ id, error: err.response?.data?.error || `Failed to delete message ${id}` });
+                    console.error(`Delete message ${id} failed:`, err.response?.status, err.response?.data);
                   }
-                  refetch();
-                } else {
-                  setLocalMessages(prev => prev.filter(msg => !selectedMessages.includes(msg.id)));
                 }
+                refetch();
                 if (selectedMessage && selectedMessages.includes(selectedMessage.id)) {
                   setSelectedMessage(null);
                 }
@@ -304,7 +292,7 @@ const MessageList = ({ initialMessages = null, disableFetch = false }) => {
       </div>,
       { autoClose: false }
     );
-  }, [disableFetch, refetch, selectedMessages, selectedMessage]);
+  }, [refetch, selectedMessages, selectedMessage]);
 
   const handleMessageClick = useCallback((message) => {
     setSelectedMessage(message);
@@ -353,7 +341,7 @@ const MessageList = ({ initialMessages = null, disableFetch = false }) => {
   return (
     <div className="bg-white shadow rounded-lg p-4 sm:p-6">
       <div className="mb-4 sm:mb-6 flex flex-col gap-4">
-        <h2 className="text-xl sm:text-2xl font-bold text-gray-800">Contact Messages</h2>
+        <div className="flex items-center justify-between gap-3"><h2 className="text-xl sm:text-2xl font-bold text-gray-800">{compact ? 'New Messages' : 'Contact Messages'}</h2><button onClick={() => setRefreshKey(value => value + 1)} disabled={loading} className="inline-flex items-center gap-2 rounded-md border px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50" title="Refresh messages"><FiRefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />{compact ? 'Refresh' : 'Refresh messages'}</button></div>
         <div className="flex flex-col sm:flex-row gap-2 sm:gap-3 w-full">
           <div className="relative flex-1">
             <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
@@ -399,14 +387,12 @@ const MessageList = ({ initialMessages = null, disableFetch = false }) => {
               </div>
               <div className="ml-3">
                 <p className="text-sm text-red-700">{error}</p>
-                {!disableFetch && (
-                  <button 
+                <button 
                     onClick={() => refetch()}
                     className="mt-2 text-sm text-red-700 underline"
                   >
                     Retry
                   </button>
-                )}
               </div>
             </div>
           </motion.div>
@@ -467,14 +453,12 @@ const MessageList = ({ initialMessages = null, disableFetch = false }) => {
           <p className="mt-1 text-xs sm:text-sm text-gray-500">
             {searchTerm || statusFilter !== 'all' ? 'Try adjusting your search or filter' : 'No messages have been received yet'}
           </p>
-          {!disableFetch && (
-            <button
+          <button
               onClick={() => refetch()}
               className="mt-2 text-sm text-blue-600 hover:text-blue-800 underline"
             >
               Refresh
             </button>
-          )}
         </div>
       ) : (
         <>
@@ -539,7 +523,7 @@ const MessageList = ({ initialMessages = null, disableFetch = false }) => {
                       initial={{ opacity: 0, y: 10 }}
                       animate={{ opacity: 1, y: 0 }}
                       transition={{ duration: 0.2 }}
-                      className={`hover:bg-gray-50 ${message.status === 'new' ? 'bg-blue-50' : ''}`}
+                      className={`hover:bg-gray-50 ${message.status === 'new' ? 'bg-blue-50' : 'bg-white'}`}
                     >
                       <td className="px-3 sm:px-6 py-4 whitespace-nowrap">
                         <input
@@ -628,7 +612,7 @@ const MessageList = ({ initialMessages = null, disableFetch = false }) => {
             <div className="text-xs sm:text-sm text-gray-700">
               Showing <span className="font-medium">{(currentPage - 1) * 10 + 1}</span> to{' '}
               <span className="font-medium">{(currentPage - 1) * 10 + messages.length}</span> of{' '}
-              <span className="font-medium">{data?.count || (disableFetch ? localMessages?.length : messages.length)}</span> results
+              <span className="font-medium">{data?.count || messages.length}</span> results
             </div>
             <div className="flex space-x-1 sm:space-x-2">
               <button
