@@ -38,8 +38,13 @@ const PhoneModal = ({ phone, onClose, onSave }) => {
   const [isSubmitting,     setIsSubmitting]     = useState(false);
   const [isLoading,        setIsLoading]        = useState(isEdit);
   const [loadError,        setLoadError]        = useState(null);
+  const [reloadKey,        setReloadKey]        = useState(0);
 
-  // ── load existing variants when editing ───────────────────────────────────
+  // ── load the rest of the phone + its variants when editing ────────────────
+  // The list only carries brand/model/thumbnail/display size, so the remaining
+  // specs come from the detail endpoint (same approach as ProductViewer).
+  // cache: false matters: api.js caches GETs for 5 minutes, and a stale read here
+  // would be written back over newer data on save.
   useEffect(() => {
     if (!isEdit || !currentPhoneId) {
       setVariants([{ id: null, storage_capacity: '', price: '', old_price: '', availability: true }]);
@@ -49,14 +54,30 @@ const PhoneModal = ({ phone, onClose, onSave }) => {
 
     let mounted = true;
     setIsLoading(true);
+    setLoadError(null);
 
-    api.get(`/phone/storage-selector/${currentPhoneId}/`)
-      .then(res => {
+    Promise.all([
+      api.get(`/phones/${currentPhoneId}/`, { cache: false }),
+      api.get(`/phone/storage-selector/${currentPhoneId}/`, { cache: false }),
+    ])
+      .then(([detailRes, variantRes]) => {
         if (!mounted) return;
-        const loaded = (res.data?.storage_variants || []).map(v => ({
+
+        const d = detailRes.data || {};
+        setFormData(prev => ({
+          ...prev,
+          camera_details:   d.camera_details   ?? prev.camera_details,
+          battery_capacity: d.battery_capacity ?? prev.battery_capacity,
+          physical_sim:     d.physical_sim     ?? prev.physical_sim,
+          esim:             d.esim             ?? prev.esim,
+          number_of_sims:   d.number_of_sims   ?? prev.number_of_sims,
+          link:             d.link             ?? prev.link,
+        }));
+
+        const loaded = (variantRes.data?.storage_variants || []).map(v => ({
           id:               v.id,
           storage_capacity: v.storage_capacity || '',
-          price:            v.price    != null ? String(v.price)    : '',
+          price:            v.price     != null ? String(v.price)     : '',
           old_price:        v.old_price != null ? String(v.old_price) : '',
           availability:     v.availability !== undefined ? v.availability : true,
         }));
@@ -64,16 +85,13 @@ const PhoneModal = ({ phone, onClose, onSave }) => {
         setOriginalVariants(JSON.parse(JSON.stringify(loaded)));
       })
       .catch(err => {
-        console.error('Load variants failed:', err);
-        if (mounted) {
-          setLoadError('Failed to load variants');
-          toast.error('Could not load variants');
-        }
+        console.error('Load phone failed:', err);
+        if (mounted) setLoadError('Could not load this phone\'s details.');
       })
       .finally(() => { if (mounted) setIsLoading(false); });
 
     return () => { mounted = false; };
-  }, [isEdit, currentPhoneId]);
+  }, [isEdit, currentPhoneId, reloadKey]);
 
   // ── field handlers ────────────────────────────────────────────────────────
   const handleChange = (e) => {
@@ -171,13 +189,12 @@ const PhoneModal = ({ phone, onClose, onSave }) => {
       onClose();
     } catch (err) {
       console.error('Submit error:', err);
-      console.error("Backend response:", error.response?.data);
-      console.error("HTTP status:", error.response?.status);
-      console.log(
-        "Django validation response:",
-        JSON.stringify(error.response?.data, null, 2)
-      );
-          } finally {
+      const msg = err.response?.data?.detail
+        || err.response?.data?.storage_capacity?.[0]
+        || err.response?.data?.price?.[0]
+        || 'Failed to save';
+      toast.error(msg);
+    } finally {
       setIsSubmitting(false);
     }
   };
@@ -210,12 +227,15 @@ const PhoneModal = ({ phone, onClose, onSave }) => {
           </div>
 
           {loadError && (
-            <div className="p-4 bg-red-50 border border-red-200 text-red-700 rounded-lg text-sm">
-              {loadError}
+            <div className="flex items-center justify-between gap-3 p-4 bg-red-50 border border-red-200 text-red-700 rounded-lg text-sm">
+              <span>{loadError} Saving is disabled until it loads.</span>
+              <button type="button" onClick={() => setReloadKey(k => k + 1)}
+                className="shrink-0 font-medium underline">Retry</button>
             </div>
           )}
 
           <form onSubmit={handleSubmit} className="space-y-8">
+            <fieldset disabled={isLoading || isSubmitting} className="min-w-0 space-y-8">
 
             {/* ── Basic info ── */}
             <section className="space-y-4">
@@ -397,13 +417,15 @@ const PhoneModal = ({ phone, onClose, onSave }) => {
               )}
             </section>
 
+            </fieldset>
+
             {/* ── Actions ── */}
             <div className="flex justify-end gap-3 pt-2">
               <button type="button" onClick={onClose} disabled={isSubmitting}
                 className="px-5 py-2.5 border border-neutral-200 rounded-lg text-sm hover:bg-neutral-50 transition disabled:opacity-50">
                 Cancel
               </button>
-              <button type="submit" disabled={isSubmitting || isLoading}
+              <button type="submit" disabled={isSubmitting || isLoading || !!loadError}
                 className="px-5 py-2.5 bg-blue-600 text-white rounded-lg text-sm font-medium flex items-center gap-2 disabled:opacity-50 transition hover:bg-blue-700">
                 {isSubmitting && <FiLoader className="animate-spin" size={14} />}
                 {isEdit ? 'Save Changes' : 'Create Phone'}

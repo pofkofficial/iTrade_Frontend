@@ -34,8 +34,14 @@ export function getAnalyticsVisitorId() {
  * Use productId for product_view and add_to_cart. For product-level purchase
  * attribution, call once per distinct product after the order is created.
  */
+
+function isLocalHost() {
+  return ['localhost', '127.0.0.1', '[::1]'].includes(window.location.hostname);
+}
+
 export async function trackStoreEvent(event, { path, productId = null } = {}) {
   if (typeof window === 'undefined') return;
+  if (isLocalHost()) return;
   const params = new URLSearchParams(window.location.search);
   try {
     await api.post('/analytics/track/', {
